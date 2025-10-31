@@ -297,9 +297,9 @@ class TradingPage(ttk.Frame):
 
         # configure grid
         # Adjusted row count for new account info section AND data readiness label
-        for r in range(13): # Increased range for new row + data readiness
+        for r in range(15): # Increased range for new rows
             self.rowconfigure(r, weight=0)
-        self.rowconfigure(13, weight=1) # Adjusted log row index
+        self.rowconfigure(15, weight=1) # Log row is now 15
         self.columnconfigure(1, weight=1)
 
 
@@ -382,15 +382,24 @@ class TradingPage(ttk.Frame):
             self.ai_button = ttk.Button(self, text="ChatGPT Analysis", command=self.run_chatgpt_analysis)
             self.ai_button.grid(row=10, column=0, columnspan=2, pady=(10, 0))
 
+        # AI Overseer Toggle
+        self.use_ai_overseer_var = tk.BooleanVar(value=self.controller.settings.ai.use_ai_overseer)
+        ttk.Checkbutton(
+            self,
+            text="Enable AI Overseer",
+            variable=self.use_ai_overseer_var,
+            command=self._toggle_ai_overseer
+        ).grid(row=11, column=0, columnspan=2, sticky="w", pady=(5,0))
+
         # Start/Stop Scalping buttons
         self.start_button = ttk.Button(self, text="Begin Scalping", command=self.start_scalping, state="normal") # Initially disabled
-        self.start_button.grid(row=11, column=0, columnspan=2, pady=(10,0))
+        self.start_button.grid(row=12, column=0, columnspan=2, pady=(10,0))
         self.stop_button  = ttk.Button(self, text="Stop Scalping", command=self.stop_scalping, state="disabled")
-        self.stop_button.grid(row=12, column=0, columnspan=2, pady=(5,0))
+        self.stop_button.grid(row=13, column=0, columnspan=2, pady=(5,0))
 
         # Session Stats frame
         stats = ttk.Labelframe(self, text="Session Stats", padding=10)
-        stats.grid(row=13, column=0, columnspan=2, sticky="ew", pady=(10,0))
+        stats.grid(row=14, column=0, columnspan=2, sticky="ew", pady=(10,0))
         stats.columnconfigure(1, weight=1)
 
         self.pnl_var       = tk.StringVar(value="0.00")
@@ -406,9 +415,9 @@ class TradingPage(ttk.Frame):
 
         # Output log
         self.output = tk.Text(self, height=8, wrap="word", state="disabled")
-        self.output.grid(row=14, column=0, columnspan=2, sticky="nsew", pady=(10,0))
+        self.output.grid(row=15, column=0, columnspan=2, sticky="nsew", pady=(10,0))
         sb = ttk.Scrollbar(self, command=self.output.yview)
-        sb.grid(row=14, column=2, sticky="ns")
+        sb.grid(row=15, column=2, sticky="ns")
         self.output.config(yscrollcommand=sb.set)
 
         # Internal counters
@@ -422,6 +431,13 @@ class TradingPage(ttk.Frame):
         # self.refresh_price() # Removed: Price will be refreshed when symbols are populated
 
         self.after(1000, self._update_data_readiness_display) # Start the data readiness update loop
+
+    def _toggle_ai_overseer(self):
+        """Called when the 'Enable AI Overseer' checkbox is clicked."""
+        new_value = self.use_ai_overseer_var.get()
+        self.controller.settings.ai.use_ai_overseer = new_value
+        self._log(f"AI Overseer {'enabled' if new_value else 'disabled'}.")
+        # No need to save to disk immediately, will be saved with other settings if user hits "Save"
 
     def _toggle_chatgpt_button(self, visible):
         if visible and not self.chatgpt_button_visible:
