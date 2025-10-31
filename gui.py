@@ -112,6 +112,9 @@ class SettingsPage(ttk.Frame):
         ttk.Label(creds, text="Account ID:").grid(row=3, column=0, sticky="w", padx=(0,5))
         ttk.Entry(creds, textvariable=self.account_id_entry_var).grid(row=3, column=1, sticky="ew")
 
+        self.use_chatgpt_var = tk.BooleanVar(value=self.controller.settings.ai.use_chatgpt)
+        ttk.Checkbutton(creds, text="Enable ChatGPT Connection", variable=self.use_chatgpt_var).grid(row=4, column=0, columnspan=2, sticky="w", pady=(5,0))
+
 
         acct = ttk.Labelframe(self, text="Account Summary", padding=10)
         acct.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0,10))
@@ -153,6 +156,7 @@ class SettingsPage(ttk.Frame):
         self.controller.settings.openapi.client_id = self.client_id_var.get()
         self.controller.settings.openapi.client_secret = self.client_secret_var.get()
         self.controller.settings.ai.advisor_auth_token = self.advisor_auth_token_var.get()
+        self.controller.settings.ai.use_chatgpt = self.use_chatgpt_var.get()
         try:
             self.controller.settings.openapi.default_ctid_trader_account_id = int(self.account_id_entry_var.get())
         except (ValueError, TypeError):
@@ -256,6 +260,7 @@ class SettingsPage(ttk.Frame):
 
         available_symbols = t.get_available_symbol_names()
         trading_page = self.controller.pages[TradingPage]
+        trading_page._toggle_chatgpt_button(self.controller.settings.ai.use_chatgpt)
         if available_symbols: # Ensure there are symbols before trying to populate
             trading_page.populate_symbols_dropdown(available_symbols)
         else:
@@ -372,8 +377,10 @@ class TradingPage(ttk.Frame):
         self.data_readiness_label.grid(row=9, column=1, sticky="ew", pady=(10,0))
 
         # ChatGPT Analysis Button
-        self.ai_button = ttk.Button(self, text="ChatGPT Analysis", command=self.run_chatgpt_analysis)
-        self.ai_button.grid(row=10, column=0, columnspan=2, pady=(10, 0))
+        self.chatgpt_button_visible = self.controller.settings.ai.use_chatgpt
+        if self.chatgpt_button_visible:
+            self.ai_button = ttk.Button(self, text="ChatGPT Analysis", command=self.run_chatgpt_analysis)
+            self.ai_button.grid(row=10, column=0, columnspan=2, pady=(10, 0))
 
         # Start/Stop Scalping buttons
         self.start_button = ttk.Button(self, text="Begin Scalping", command=self.start_scalping, state="normal") # Initially disabled
@@ -401,6 +408,15 @@ class TradingPage(ttk.Frame):
         self.output = tk.Text(self, height=8, wrap="word", state="disabled")
         self.output.grid(row=14, column=0, columnspan=2, sticky="nsew", pady=(10,0))
         sb = ttk.Scrollbar(self, command=self.output.yview)
+
+    def _toggle_chatgpt_button(self, visible):
+        if visible and not self.chatgpt_button_visible:
+            self.ai_button = ttk.Button(self, text="ChatGPT Analysis", command=self.run_chatgpt_analysis)
+            self.ai_button.grid(row=10, column=0, columnspan=2, pady=(10, 0))
+            self.chatgpt_button_visible = True
+        elif not visible and self.chatgpt_button_visible:
+            self.ai_button.destroy()
+            self.chatgpt_button_visible = False
         sb.grid(row=14, column=2, sticky="ns")
         self.output.config(yscrollcommand=sb.set)
 
