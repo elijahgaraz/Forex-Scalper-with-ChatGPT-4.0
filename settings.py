@@ -37,6 +37,7 @@ class GeneralSettings:
 class AISettings:
     """Settings for the AI Overseer integration."""
     use_ai_overseer: bool = False
+    use_chatgpt: bool = False
     advisor_url: Optional[str] = None
     advisor_auth_token: Optional[str] = None
     advisor_timeout_ms: int = 7000
@@ -98,6 +99,7 @@ class Settings:
 
         ai_settings = AISettings(
             use_ai_overseer=ai_cfg.get("use_ai_overseer", False),
+            use_chatgpt=ai_cfg.get("use_chatgpt", False),
             advisor_url=ai_cfg.get("advisor_url"),
             advisor_auth_token=os.environ.get("ADVISOR_AUTH_TOKEN") or ai_cfg.get("advisor_auth_token"),
             advisor_timeout_ms=ai_cfg.get("advisor_timeout_ms", 7000),
@@ -137,6 +139,7 @@ class Settings:
             },
             "ai": {
                 "use_ai_overseer": self.ai.use_ai_overseer,
+                "use_chatgpt": self.ai.use_chatgpt,
                 "advisor_url": self.ai.advisor_url,
                 "advisor_auth_token": self.ai.advisor_auth_token if not os.environ.get("ADVISOR_AUTH_TOKEN") else None,
                 "advisor_timeout_ms": self.ai.advisor_timeout_ms,
