@@ -408,15 +408,6 @@ class TradingPage(ttk.Frame):
         self.output = tk.Text(self, height=8, wrap="word", state="disabled")
         self.output.grid(row=14, column=0, columnspan=2, sticky="nsew", pady=(10,0))
         sb = ttk.Scrollbar(self, command=self.output.yview)
-
-    def _toggle_chatgpt_button(self, visible):
-        if visible and not self.chatgpt_button_visible:
-            self.ai_button = ttk.Button(self, text="ChatGPT Analysis", command=self.run_chatgpt_analysis)
-            self.ai_button.grid(row=10, column=0, columnspan=2, pady=(10, 0))
-            self.chatgpt_button_visible = True
-        elif not visible and self.chatgpt_button_visible:
-            self.ai_button.destroy()
-            self.chatgpt_button_visible = False
         sb.grid(row=14, column=2, sticky="ns")
         self.output.config(yscrollcommand=sb.set)
 
@@ -431,6 +422,16 @@ class TradingPage(ttk.Frame):
         # self.refresh_price() # Removed: Price will be refreshed when symbols are populated
 
         self.after(1000, self._update_data_readiness_display) # Start the data readiness update loop
+
+    def _toggle_chatgpt_button(self, visible):
+        if visible and not self.chatgpt_button_visible:
+            self.ai_button = ttk.Button(self, text="ChatGPT Analysis", command=self.run_chatgpt_analysis)
+            self.ai_button.grid(row=10, column=0, columnspan=2, pady=(10, 0))
+            self.chatgpt_button_visible = True
+        elif not visible and self.chatgpt_button_visible:
+            if hasattr(self, 'ai_button'):
+                self.ai_button.destroy()
+            self.chatgpt_button_visible = False
 
 
     def _update_data_readiness_display(self, execute_now=False): # Added execute_now for immediate updates
