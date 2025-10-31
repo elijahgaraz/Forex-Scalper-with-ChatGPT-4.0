@@ -180,8 +180,8 @@ class SafeStrategy(Strategy):
         now_local = self._to_session_dt(now_raw)
         print(f"DEBUG - now_raw={now_raw!r} type={type(now_raw)}, now_local={now_local} [{self.session_zone}]")
 
-        if not self.in_session(now_raw):
-            return self._hold("outside trading session")
+        # if not self.in_session(now_raw):
+        #     return self._hold("outside trading session")
 
         close = df['close']
         vol = df.get('volume', pd.Series(dtype=float))
