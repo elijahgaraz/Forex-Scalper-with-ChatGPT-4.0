@@ -17,7 +17,7 @@ from ttkthemes import ThemedTk
 class MainApplication(ThemedTk):
     def __init__(self, settings):
         super().__init__(theme="arc")
-        self.title("Forex Scalper")
+        self.title("MegaTrader by Elijah G")
 
         # make window resizable
         self.rowconfigure(0, weight=1)
@@ -394,9 +394,9 @@ class TradingPage(ttk.Frame):
         ).grid(row=11, column=0, columnspan=2, sticky="w", pady=(5,0))
 
         # Start/Stop Scalping buttons
-        self.start_button = ttk.Button(self, text="Begin Scalping", command=self.start_scalping, state="normal") # Initially disabled
+        self.start_button = ttk.Button(self, text="Start Trading Session", command=self.start_scalping, state="normal") # Initially disabled
         self.start_button.grid(row=12, column=0, columnspan=2, pady=(10,0))
-        self.stop_button  = ttk.Button(self, text="Stop Scalping", command=self.stop_scalping, state="disabled")
+        self.stop_button  = ttk.Button(self, text="End Trading Session", command=self.stop_scalping, state="disabled")
         self.stop_button.grid(row=13, column=0, columnspan=2, pady=(5,0))
 
         # Session Stats frame
