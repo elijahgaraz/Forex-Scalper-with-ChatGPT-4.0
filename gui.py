@@ -7,8 +7,7 @@ from typing import List, Dict, Any # Added for type hinting
 import pandas as pd # Added for OHLC data handling
 from trading import Trader, AiAdvice # adjust import path if needed
 from strategies import (
-    SafeStrategy, ModerateStrategy, AggressiveStrategy,
-    MomentumStrategy, MeanReversionStrategy
+    SafeStrategy, AggressiveStrategy
 )
 from indicators import (
     calculate_ema, calculate_atr, calculate_rsi, calculate_adx
@@ -356,15 +355,18 @@ class TradingPage(ttk.Frame):
         self.sl_var = tk.DoubleVar(value=5.0)
         ttk.Entry(self, textvariable=self.sl_var).grid(row=6, column=1, sticky="ew") # Was row=5
 
-        # Batch profit target
-        ttk.Label(self, text="Batch Profit Target:").grid(row=7, column=0, sticky="w", padx=(0,5))
-        self.batch_profit_var = tk.DoubleVar(value=self.controller.settings.general.batch_profit_target)
-        ttk.Entry(self, textvariable=self.batch_profit_var).grid(row=7, column=1, sticky="ew")
+        # Trailing Stop Toggle
+        self.use_trailing_stop_var = tk.BooleanVar(value=True) # Default to on
+        ttk.Checkbutton(
+            self,
+            text="Enable Trailing Stop",
+            variable=self.use_trailing_stop_var
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(5,0))
 
         # Strategy selector
         ttk.Label(self, text="Strategy:").grid(row=8, column=0, sticky="w", padx=(0,5))
         self.strategy_var = tk.StringVar(value="Safe")
-        strategy_names = ["Safe", "Moderate", "Aggressive", "Momentum", "Mean Reversion"]
+        strategy_names = ["Safe", "Aggressive"] # Updated list
         cb_strat = ttk.Combobox(self, textvariable=self.strategy_var, values=strategy_names, state="readonly")
         cb_strat.grid(row=8, column=1, sticky="ew")
         cb_strat.bind("<<ComboboxSelected>>", lambda e: self._update_data_readiness_display(execute_now=True))
@@ -653,14 +655,8 @@ class TradingPage(ttk.Frame):
         sel = self.strategy_var.get()
         if sel == "Safe":
             strategy = SafeStrategy(self.controller.settings)
-        elif sel == "Moderate":
-            strategy = ModerateStrategy(self.controller.settings)
-        elif sel == "Aggressive":
+        else: # Aggressive
             strategy = AggressiveStrategy(self.controller.settings)
-        elif sel == "Mean Reversion":
-            strategy = MeanReversionStrategy(self.controller.settings)
-        else:
-            strategy = MomentumStrategy(self.controller.settings)
 
         self._log(f"Strategy created: {strategy.NAME}")
 
@@ -669,18 +665,12 @@ class TradingPage(ttk.Frame):
         sl     = self.sl_var.get()
         size   = self.size_var.get()
 
-        summary = self.trader.get_account_summary()
-        self.batch_start_equity = summary.get("equity", 0.0) or 0.0
-        self.current_batch_trades = 0
-
-        batch_target = self.batch_profit_var.get()
-
         self._toggle_scalping_ui(True)
 
         # Start real trading loop
         self.scalping_thread = threading.Thread(
             target=self._scalp_loop,
-            args=(symbol, tp, sl, size, strategy, batch_target),
+            args=(symbol, tp, sl, size, strategy),
             daemon=True
         )
         self.scalping_thread.start()
@@ -735,34 +725,14 @@ class TradingPage(ttk.Frame):
 
         messagebox.showinfo("Scalping Started", f"Live scalping thread started for {symbol}")
 
-    def _scalp_loop(self, symbol: str, tp: float, sl: float, size: float, strategy_name: str, batch_target: float):
+    def _scalp_loop(self, symbol: str, tp: float, sl: float, size: float, strategy_name: str):
         print("SCALP LOOP STARTED")
         while self.is_scalping:
             # THIS IS THE KEY CHANGE: CREATE A NEW STRATEGY OBJECT IN EVERY LOOP
             if strategy_name == "Safe":
                 strategy = SafeStrategy(self.controller.settings)
-            elif strategy_name == "Moderate":
-                strategy = ModerateStrategy(self.controller.settings)
-            elif strategy_name == "Aggressive":
+            else: # Aggressive
                 strategy = AggressiveStrategy(self.controller.settings)
-            elif strategy_name == "Mean Reversion":
-                strategy = MeanReversionStrategy(self.controller.settings)
-            else: # Momentum
-                strategy = MomentumStrategy(self.controller.settings)
-
-            if self.current_batch_trades >= self.batch_size:
-                summary = self.trader.get_account_summary()
-                equity = summary.get("equity", 0.0) or 0.0
-                if equity - self.batch_start_equity >= batch_target:
-                    self.controller._ui_queue.put(("_log", "Batch profit target reached. Closing positions."))
-                    try:
-                        self.trader.close_all_positions()
-                    except Exception as e:
-                        self.controller._ui_queue.put(("_log", f"Error closing positions: {e}"))
-                    self.batch_start_equity = equity
-                    self.current_batch_trades = 0
-                # BUG FIX: Removed the `else...continue` which would halt trading if the
-                # profit target was not met after the batch size was reached.
 
             print("Fetching tick price...")
             current_tick_price = self.trader.get_market_price(symbol)
@@ -777,6 +747,7 @@ class TradingPage(ttk.Frame):
             # was no longer a RangeIndex.
 
             # Strategy decision
+            use_trailing_stop = self.use_trailing_stop_var.get()
             action_details = strategy.decide(
                 symbol,
                 {
@@ -786,7 +757,8 @@ class TradingPage(ttk.Frame):
                     'pip_position': None,
                     'current_price_tick': current_tick_price
                 },
-                self.trader
+                self.trader,
+                use_trailing_stop=use_trailing_stop
             )
 
             print(f"Strategy decision: {action_details}")

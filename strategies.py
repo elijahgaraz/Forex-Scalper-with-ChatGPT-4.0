@@ -67,9 +67,6 @@ class SafeStrategy(Strategy):
         self.session_end = session_end
         self.session_zone = ZoneInfo(session_tz)
 
-        # Trailing stop state
-        self.trailing_activated = False
-
     def get_required_bars(self) -> Dict[str, int]:
         return {'1m': self.settings.general.min_bars_for_trading}
 
@@ -165,7 +162,7 @@ class SafeStrategy(Strategy):
             'tp_offset': None
         }
 
-    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader") -> Dict[str, Any]:
+    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader", use_trailing_stop: bool = False) -> Dict[str, Any]:
         df: pd.DataFrame = data.get('ohlc_1m')
         print("DECIDE() called - OHLC shape:", df.shape if df is not None else "None")
         if df is None or len(df) < self.settings.general.min_bars_for_trading:
@@ -215,20 +212,14 @@ class SafeStrategy(Strategy):
         tp_pips = tp * pip_factor
 
         # Trailing stop logic
-        if not self.trailing_activated and (
-            (action == 'buy' and price > ema + 2 * buffer) or
-            (action == 'sell' and price < ema - 2 * buffer)
-        ):
-            self.trailing_activated = True
-            comment += "; trailing stop activated"
-
-        if self.trailing_activated:
+        if use_trailing_stop:
             breakeven_offset = atr * 0.1
             prev_close = close.iloc[-2]
             if action == 'buy':
                 sl = min(sl, price - (prev_close + breakeven_offset))
             else:
                 sl = min(sl, (prev_close - breakeven_offset) - price)
+            comment += "; trailing stop active"
 
         # --- AI Overseer Integration ---
         if trader.settings.ai.use_ai_overseer and action in ('buy', 'sell'):
@@ -280,195 +271,116 @@ class SafeStrategy(Strategy):
             'action': action,
             'comment': f"{self.NAME}: {comment}",
             'sl_offset': sl_pips,
-            'tp_offset': tp_pips,
-            'risk_percentage': self.settings.general.risk_percentage
+            'tp_offset': tp_pips
         }
 
 
-class ModerateStrategy(Strategy):
-    NAME = "Moderate Trend-Following Scalper"
-
-    def __init__(self, settings):
-        self.settings = settings
-        self.ema_period = 20
-        self.atr_period = 14
-        self.stop_multiplier = 1.5
-        self.target_multiplier = 1.0
-
-    def get_required_bars(self) -> Dict[str, int]:
-        return {'1m': self.settings.general.min_bars_for_trading}
-
-    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader") -> Dict[str, Any]:
-        df: pd.DataFrame = data.get('ohlc_1m')
-        if df is None or len(df) < self.settings.general.min_bars_for_trading:
-            return {
-                'action': 'hold',
-                'comment': f'{self.NAME}: insufficient data',
-                'sl_offset': None,
-                'tp_offset': None
-            }
-
-        ema = calculate_ema(df['close'], self.ema_period).iloc[-1]
-        atr = calculate_atr(df, self.atr_period).iloc[-1]
-        price = df['close'].iloc[-1]
-
-        if price > ema:
-            action = 'buy'
-            comment = f'{self.NAME}: bullish trend detected'
-        elif price < ema:
-            action = 'sell'
-            comment = f'{self.NAME}: bearish trend detected'
-        else:
-            return {
-                'action': 'hold',
-                'comment': f'{self.NAME}: no clear trend',
-                'sl_offset': None,
-                'tp_offset': None
-            }
-
-        sl_offset = atr * self.stop_multiplier
-        tp_offset = atr * self.target_multiplier
-        return {'action': action, 'comment': comment, 'sl_offset': sl_offset, 'tp_offset': tp_offset}
-
-
 class AggressiveStrategy(Strategy):
-    NAME = "Aggressive Trend-Following Scalper"
+    NAME = "Aggressive RSI Momentum Scalper"
 
     def __init__(self, settings):
         self.settings = settings
-        self.ema_period = 10
-        self.atr_period = 7
-        self.stop_multiplier = 2.0
-        self.target_multiplier = 1.5
-
-    def get_required_bars(self) -> Dict[str, int]:
-        return {'1m': self.settings.general.min_bars_for_trading}
-
-    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader") -> Dict[str, Any]:
-        df: pd.DataFrame = data.get('ohlc_1m')
-        if df is None or len(df) < self.settings.general.min_bars_for_trading:
-            return {
-                'action': 'hold',
-                'comment': f'{self.NAME}: insufficient data',
-                'sl_offset': None,
-                'tp_offset': None
-            }
-
-        ema = calculate_ema(df['close'], self.ema_period).iloc[-1]
-        atr = calculate_atr(df, self.atr_period).iloc[-1]
-        price = df['close'].iloc[-1]
-
-        if price > ema:
-            action = 'buy'
-            comment = f'{self.NAME}: going long aggressively'
-        elif price < ema:
-            action = 'sell'
-            comment = f'{self.NAME}: going short aggressively'
-        else:
-            return {
-                'action': 'hold',
-                'comment': f'{self.NAME}: awaiting breakout',
-                'sl_offset': None,
-                'tp_offset': None
-            }
-
-        sl_offset = atr * self.stop_multiplier
-        tp_offset = atr * self.target_multiplier
-        return {'action': action, 'comment': comment, 'sl_offset': sl_offset, 'tp_offset': tp_offset}
-
-
-class MomentumStrategy(Strategy):
-    NAME = "Momentum Fade Scalper"
-
-    def __init__(self, settings):
-        self.settings = settings
-        self.ema_period = 20
+        self.ema_fast_period = 12
+        self.ema_slow_period = 26
+        self.rsi_period = 14
+        self.rsi_overbought = 70
+        self.rsi_oversold = 30
         self.atr_period = 14
-        self.fade_threshold = 1.5  # ATR multiples
-        self.stop_multiplier = 1.0
-        self.target_multiplier = 1.5
+        self.stop_multiplier = 1.8
+        self.target_multiplier = 2.5
 
     def get_required_bars(self) -> Dict[str, int]:
         return {'1m': self.settings.general.min_bars_for_trading}
 
-    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader") -> Dict[str, Any]:
+    def _hold(self, reason: str) -> Dict[str, Any]:
+        return {
+            'action': 'hold',
+            'comment': f"{self.NAME}: {reason}",
+            'sl_offset': None,
+            'tp_offset': None
+        }
+
+    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader", use_trailing_stop: bool = False) -> Dict[str, Any]:
         df: pd.DataFrame = data.get('ohlc_1m')
-        if df is None or len(df) < self.settings.general.min_bars_for_trading:
-            return {
-                'action': 'hold',
-                'comment': f'{self.NAME}: insufficient data',
-                'sl_offset': None,
-                'tp_offset': None
-            }
+        if df is None or len(df) < max(self.ema_slow_period, self.rsi_period, self.atr_period):
+            return self._hold("insufficient data")
 
-        ema = calculate_ema(df['close'], self.ema_period).iloc[-1]
+        close = df['close']
+        price = close.iloc[-1]
+
+        # --- Indicators ---
+        ema_fast = calculate_ema(close, self.ema_fast_period).iloc[-1]
+        ema_slow = calculate_ema(close, self.ema_slow_period).iloc[-1]
+        rsi = calculate_rsi(df, self.rsi_period).iloc[-1]
         atr = calculate_atr(df, self.atr_period).iloc[-1]
-        price = df['close'].iloc[-1]
-        diff = price - ema
 
-        if diff > atr * self.fade_threshold:
-            action = 'sell'
-            comment = f'{self.NAME}: fading overextension'
-        elif diff < -atr * self.fade_threshold:
+        # --- Entry Conditions ---
+        action = 'hold'
+        comment = "no signal"
+
+        is_bullish_trend = ema_fast > ema_slow
+        is_bearish_trend = ema_fast < ema_slow
+
+        if is_bullish_trend and rsi > 55:  # Strong bullish momentum confirmed by RSI
             action = 'buy'
-            comment = f'{self.NAME}: fading downside spike'
-        else:
-            return {
-                'action': 'hold',
-                'comment': f'{self.NAME}: no fade opportunity',
-                'sl_offset': None,
-                'tp_offset': None
-            }
-
-        sl_offset = atr * self.stop_multiplier
-        tp_offset = atr * self.target_multiplier
-        return {'action': action, 'comment': comment, 'sl_offset': sl_offset, 'tp_offset': tp_offset}
-
-
-class MeanReversionStrategy(Strategy):
-    NAME = "Mean-Reversion Scalper"
-
-    def __init__(self, settings):
-        self.settings = settings
-        self.ema_period = 20
-        self.atr_period = 14
-        self.band_multiplier = 2.0  # ATR multiples
-        self.stop_multiplier = 1.0
-        self.target_multiplier = 2.0
-
-    def get_required_bars(self) -> Dict[str, int]:
-        return {'1m': self.settings.general.min_bars_for_trading}
-
-    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader") -> Dict[str, Any]:
-        df: pd.DataFrame = data.get('ohlc_1m')
-        if df is None or len(df) < self.settings.general.min_bars_for_trading:
-            return {
-                'action': 'hold',
-                'comment': f'{self.NAME}: insufficient data',
-                'sl_offset': None,
-                'tp_offset': None
-            }
-
-        ema = calculate_ema(df['close'], self.ema_period).iloc[-1]
-        atr = calculate_atr(df, self.atr_period).iloc[-1]
-        price = df['close'].iloc[-1]
-        upper = ema + atr * self.band_multiplier
-        lower = ema - atr * self.band_multiplier
-
-        if price > upper:
+            comment = f"Bullish trend (EMA {self.ema_fast_period} > {self.ema_slow_period}) and strong RSI ({rsi:.2f})"
+        elif is_bearish_trend and rsi < 45:  # Strong bearish momentum confirmed by RSI
             action = 'sell'
-            comment = f'{self.NAME}: price above upper band'
-        elif price < lower:
-            action = 'buy'
-            comment = f'{self.NAME}: price below lower band'
+            comment = f"Bearish trend (EMA {self.ema_fast_period} < {self.ema_slow_period}) and weak RSI ({rsi:.2f})"
         else:
-            return {
-                'action': 'hold',
-                'comment': f'{self.NAME}: within bands',
-                'sl_offset': None,
-                'tp_offset': None
-            }
+            return self._hold(f"Trend not confirmed by RSI (EMA fast/slow: {ema_fast:.4f}/{ema_slow:.4f}, RSI: {rsi:.2f})")
 
-        sl_offset = atr * self.stop_multiplier
-        tp_offset = atr * self.target_multiplier
-        return {'action': action, 'comment': comment, 'sl_offset': sl_offset, 'tp_offset': tp_offset}
+        # --- SL/TP Calculation ---
+        # Convert ATR-based price distance to pips
+        # This factor needs to be adjusted for JPY pairs (e.g., USDJPY should use 100)
+        pip_factor = 10000
+        sl_pips = atr * self.stop_multiplier * pip_factor
+        tp_pips = atr * self.target_multiplier * pip_factor
+
+        if use_trailing_stop:
+            # More aggressive trail - start trailing sooner
+            breakeven_offset = atr * 0.2
+            prev_close = close.iloc[-2]
+            if action == 'buy':
+                sl_pips = min(sl_pips, (price - (prev_close + breakeven_offset)) * pip_factor)
+            else:
+                sl_pips = min(sl_pips, ((prev_close - breakeven_offset) - price) * pip_factor)
+            comment += "; trailing stop active"
+
+        # --- AI Overseer Integration (Optional but recommended) ---
+        if trader.settings.ai.use_ai_overseer:
+            # Construct payload for AI
+            features = {
+                "price_bid": price,
+                "ema_fast": ema_fast,
+                "ema_slow": ema_slow,
+                "rsi": rsi,
+                "adx": 0,  # ADX not used here, can be added if needed
+                "atr": atr,
+                "spread_pips": 0
+            }
+            intent = 'long' if action == 'buy' else 'short'
+            bot_proposal = {"side": intent, "sl_pips": sl_pips, "tp_pips": tp_pips}
+
+            # Get AI advice
+            ai_advice = trader.get_ai_advice(symbol, intent, features, bot_proposal)
+
+            # Act on AI advice
+            if ai_advice:
+                if ai_advice.confidence < trader.settings.ai.advisor_min_confidence:
+                    return self._hold(f"AI confidence too low ({ai_advice.confidence:.2%})")
+
+                ai_action_map = {'long': 'buy', 'short': 'sell'}
+                if ai_action_map.get(ai_advice.action) != action:
+                    return self._hold(f"AI disagrees (AI: {ai_advice.action}, Strat: {action})")
+
+                comment += f" | AI Confirmed (Conf: {ai_advice.confidence:.2%})"
+            else:
+                return self._hold("AI advisor failed to respond.")
+
+        return {
+            'action': action,
+            'comment': f"{self.NAME}: {comment}",
+            'sl_offset': sl_pips,
+            'tp_offset': tp_pips
+        }
