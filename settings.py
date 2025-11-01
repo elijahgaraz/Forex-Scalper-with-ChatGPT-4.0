@@ -30,7 +30,6 @@ class GeneralSettings:
     chart_update_interval_ms: int = 500
     min_bars_for_trading: int = 50
     risk_percentage: float = 1.0
-    batch_profit_target: float = 10.0
     # Add other general app settings here if any
 
 @dataclass
@@ -93,8 +92,7 @@ class Settings:
             default_symbol=general_cfg.get("default_symbol", "EUR/USD"),
             chart_update_interval_ms=general_cfg.get("chart_update_interval_ms", 500),
             min_bars_for_trading=general_cfg.get("min_bars_for_trading", 50),
-            risk_percentage=general_cfg.get("risk_percentage", 1.0),
-            batch_profit_target=general_cfg.get("batch_profit_target", 10.0)
+            risk_percentage=general_cfg.get("risk_percentage", 1.0)
         )
 
         ai_settings = AISettings(
@@ -135,7 +133,6 @@ class Settings:
                 "chart_update_interval_ms": self.general.chart_update_interval_ms,
                 "min_bars_for_trading": self.general.min_bars_for_trading,
                 "risk_percentage": self.general.risk_percentage,
-                "batch_profit_target": self.general.batch_profit_target,
             },
             "ai": {
                 "use_ai_overseer": self.ai.use_ai_overseer,
