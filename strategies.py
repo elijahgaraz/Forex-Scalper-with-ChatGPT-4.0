@@ -162,7 +162,7 @@ class SafeStrategy(Strategy):
             'tp_offset': None
         }
 
-    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader", use_trailing_stop: bool = False) -> Dict[str, Any]:
+    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader") -> Dict[str, Any]:
         df: pd.DataFrame = data.get('ohlc_1m')
         print("DECIDE() called - OHLC shape:", df.shape if df is not None else "None")
         if df is None or len(df) < self.settings.general.min_bars_for_trading:
@@ -202,24 +202,9 @@ class SafeStrategy(Strategy):
             action = 'sell'
             comment = f"price {price:.5f} below EMA{self.ema_period} - buffer"
 
-        # Base stops
-        sl = atr * self.stop_mult
-        tp = atr * self.target_mult
-
-        # Convert offsets from price distance to pips (1 pip = 0.0001 for most pairs)
-        pip_factor = 10000  # Use 100 for JPY pairs like USDJPY
-        sl_pips = sl * pip_factor
-        tp_pips = tp * pip_factor
-
-        # Trailing stop logic
-        if use_trailing_stop:
-            breakeven_offset = atr * 0.1
-            prev_close = close.iloc[-2]
-            if action == 'buy':
-                sl = min(sl, price - (prev_close + breakeven_offset))
-            else:
-                sl = min(sl, (prev_close - breakeven_offset) - price)
-            comment += "; trailing stop active"
+        # SL/TP values will now be taken from the GUI.
+        sl_pips = None
+        tp_pips = None
 
         # --- AI Overseer Integration ---
         if trader.settings.ai.use_ai_overseer and action in ('buy', 'sell'):
@@ -300,7 +285,7 @@ class AggressiveStrategy(Strategy):
             'tp_offset': None
         }
 
-    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader", use_trailing_stop: bool = False) -> Dict[str, Any]:
+    def decide(self, symbol: str, data: Dict[str, Any], trader: "Trader") -> Dict[str, Any]:
         df: pd.DataFrame = data.get('ohlc_1m')
         if df is None or len(df) < max(self.ema_slow_period, self.rsi_period, self.atr_period):
             return self._hold("insufficient data")
@@ -330,22 +315,9 @@ class AggressiveStrategy(Strategy):
         else:
             return self._hold(f"Trend not confirmed by RSI (EMA fast/slow: {ema_fast:.4f}/{ema_slow:.4f}, RSI: {rsi:.2f})")
 
-        # --- SL/TP Calculation ---
-        # Convert ATR-based price distance to pips
-        # This factor needs to be adjusted for JPY pairs (e.g., USDJPY should use 100)
-        pip_factor = 10000
-        sl_pips = atr * self.stop_multiplier * pip_factor
-        tp_pips = atr * self.target_multiplier * pip_factor
-
-        if use_trailing_stop:
-            # More aggressive trail - start trailing sooner
-            breakeven_offset = atr * 0.2
-            prev_close = close.iloc[-2]
-            if action == 'buy':
-                sl_pips = min(sl_pips, (price - (prev_close + breakeven_offset)) * pip_factor)
-            else:
-                sl_pips = min(sl_pips, ((prev_close - breakeven_offset) - price) * pip_factor)
-            comment += "; trailing stop active"
+        # SL/TP values will now be taken from the GUI.
+        sl_pips = None
+        tp_pips = None
 
         # --- AI Overseer Integration (Optional but recommended) ---
         if trader.settings.ai.use_ai_overseer:
