@@ -355,14 +355,6 @@ class TradingPage(ttk.Frame):
         self.sl_var = tk.DoubleVar(value=5.0)
         ttk.Entry(self, textvariable=self.sl_var).grid(row=6, column=1, sticky="ew") # Was row=5
 
-        # Trailing Stop Toggle
-        self.use_trailing_stop_var = tk.BooleanVar(value=True) # Default to on
-        ttk.Checkbutton(
-            self,
-            text="Enable Trailing Stop",
-            variable=self.use_trailing_stop_var
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(5,0))
-
         # Strategy selector
         ttk.Label(self, text="Strategy:").grid(row=8, column=0, sticky="w", padx=(0,5))
         self.strategy_var = tk.StringVar(value="Safe")
@@ -741,7 +733,6 @@ class TradingPage(ttk.Frame):
             # was no longer a RangeIndex.
 
             # Strategy decision
-            use_trailing_stop = self.use_trailing_stop_var.get()
             action_details = strategy.decide(
                 symbol,
                 {
@@ -751,8 +742,7 @@ class TradingPage(ttk.Frame):
                     'pip_position': None,
                     'current_price_tick': current_tick_price
                 },
-                self.trader,
-                use_trailing_stop=use_trailing_stop
+                self.trader
             )
 
             print(f"Strategy decision: {action_details}")
