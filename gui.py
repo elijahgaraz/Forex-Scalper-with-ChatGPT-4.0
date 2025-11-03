@@ -706,19 +706,13 @@ class TradingPage(ttk.Frame):
         sl     = self.sl_var.get()
         size   = self.size_var.get()
 
-        summary = self.trader.get_account_summary()
-        self.batch_start_equity = summary.get("equity", 0.0) or 0.0
-        self.current_batch_trades = 0
-
-        batch_target = self.batch_profit_var.get()
-
         self._toggle_scalping_ui(True)
 
         # Start real trading loop
         self.scalping_thread = threading.Thread(
             target=self._scalp_loop,
             # PASS THE NAME OF THE STRATEGY, NOT THE OBJECT ITSELF
-            args=(symbol, tp, sl, size, strategy_name, batch_target),
+            args=(symbol, tp, sl, size, strategy_name),
             daemon=True
         )
         self.scalping_thread.start()
