@@ -162,6 +162,12 @@ class Trader:
         self.ohlc_history: Dict[str, Dict[str, pd.DataFrame]] = {}
         self.max_ohlc_history_len = 500
 
+        # Initialize token fields before loading
+        self._access_token: Optional[str] = None
+        self._refresh_token: Optional[str] = None
+        self._token_expires_at: Optional[float] = None
+        self._load_tokens_from_file() # Load tokens on initialization
+
     def _initialize_symbol_data_structures(self, symbol_name: str):
         """Initializes the data storage for a newly discovered symbol."""
         if symbol_name not in self.ohlc_history:
@@ -175,12 +181,6 @@ class Trader:
                     'timestamp': None, 'open': None, 'high': None, 'low': None, 'close': None, 'volume': 0
                 }
             print(f"Initialized data structures for symbol: {symbol_name}")
-
-        # Initialize token fields before loading
-        self._access_token: Optional[str] = None
-        self._refresh_token: Optional[str] = None
-        self._token_expires_at: Optional[float] = None
-        self._load_tokens_from_file() # Load tokens on initialization
 
         # Account details
         self.ctid_trader_account_id: Optional[int] = settings.openapi.default_ctid_trader_account_id
