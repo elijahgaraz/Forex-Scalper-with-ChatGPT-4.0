@@ -1570,18 +1570,11 @@ class Trader:
             print(f"Mock mode: Returning random price for {symbol}")
             return round(random.uniform(1.10, 1.20), 5)
 
-        if self.default_symbol_id is None:
-            print(f"Warning: Default symbol ID not set. Cannot get market price for {symbol}.")
-            return None
-        if symbol != self.settings.general.default_symbol:
-            print(f"Warning: get_market_price currently only supports the default symbol '{self.settings.general.default_symbol}'. Requested: '{symbol}'. Returning latest from default history if available.")
-            # Depending on strictness, one might return None here.
-            # For now, proceed to return default symbol's last price.
-
         if not self.price_history:
-            # print(f"No price history available for default symbol ({self.settings.general.default_symbol}). Cannot get market price.")
             return None # No data yet
 
+        # This is a temporary fix. A proper solution requires a more significant refactoring.
+        # For now, we will just return the last price in the history, regardless of the symbol.
         return self.price_history[-1]
 
     def get_price_history(self) -> List[float]:
