@@ -478,7 +478,8 @@ class TradingPage(ttk.Frame):
             return
 
         required_bars_map = strategy_instance.get_required_bars()
-        available_bars_map = self.trader.get_ohlc_bar_counts()
+        symbol_name = self.symbol_var.get()
+        available_bars_map = self.trader.get_ohlc_bar_counts(symbol_name)
 
         status_messages = []
         all_ready = True
@@ -755,7 +756,7 @@ class TradingPage(ttk.Frame):
                     comment = action_details.get('comment', '')
 
                     self.controller._ui_queue.put(("_log", f"Strategy signal: {trade_action.upper()} for {symbol}. {comment}"))
-                    self.controller._ui_queue.put(("_execute_trade", (trade_action, symbol, current_tick_price, size, tp, sl, sl_offset, tp_offset, comment)))
+                    self.controller._ui_queue.put(("_execute_trade", (trade_action, symbol, current_tick_price, size, self.tp_var.get(), self.sl_var.get(), sl_offset, tp_offset, comment)))
                 else:
                     comment = action_details.get('comment', "Strategy returned HOLD or no action.")
                     self.controller._ui_queue.put(("_log", comment))
