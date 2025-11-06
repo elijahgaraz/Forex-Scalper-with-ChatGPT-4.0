@@ -149,32 +149,32 @@ class Trader:
         self.is_connected: bool = False
         self._is_client_connected: bool = False
         self._last_error: str = ""
-        self.price_history: List[float] = [] # Stores recent bid prices for the default symbol (tick data)
-        self.history_size = history_size # Max length for self.price_history
+        self.price_history: Dict[str, List[float]] = {}
+        self.history_size = history_size
 
-        # OHLC Data Storage for default symbol
+        # OHLC Data Storage, now symbol-aware
         self.timeframes_seconds = {
             '15s': 15,
             '1m': 60,
             '5m': 300
         }
-        self.current_bars = {} # Stores the currently forming bar for each timeframe
-        self.ohlc_history = {} # Stores history of completed bars for each timeframe
-        self.max_ohlc_history_len = 500 # Max number of OHLC bars to keep per timeframe
+        self.current_bars: Dict[str, Dict[str, Any]] = {}
+        self.ohlc_history: Dict[str, Dict[str, pd.DataFrame]] = {}
+        self.max_ohlc_history_len = 500
 
-        for tf_str in self.timeframes_seconds.keys():
-            self.current_bars[tf_str] = {
-                'timestamp': None, # Start time of the bar (datetime object)
-                'open': None,
-                'high': None,
-                'low': None,
-                'close': None,
-                'volume': 0 # Using tick count as volume for now
-            }
-            self.ohlc_history[tf_str] = pd.DataFrame(
-                columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
-            )
-
+    def _initialize_symbol_data_structures(self, symbol_name: str):
+        """Initializes the data storage for a newly discovered symbol."""
+        if symbol_name not in self.ohlc_history:
+            self.ohlc_history[symbol_name] = {}
+            self.current_bars[symbol_name] = {}
+            for tf_str in self.timeframes_seconds.keys():
+                self.ohlc_history[symbol_name][tf_str] = pd.DataFrame(
+                    columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                )
+                self.current_bars[symbol_name][tf_str] = {
+                    'timestamp': None, 'open': None, 'high': None, 'low': None, 'close': None, 'volume': 0
+                }
+            print(f"Initialized data structures for symbol: {symbol_name}")
 
         # Initialize token fields before loading
         self._access_token: Optional[str] = None
@@ -573,28 +573,23 @@ class Trader:
         # self.symbol_details_map.clear() # Cleared by symbol_details_response if needed, or upon new full fetch
         self.default_symbol_id = None
 
-        # The field in ProtoOASymbolsListRes is typically 'symbol' but contains ProtoOALightSymbol objects.
-        # If the field name is different (e.g., 'lightSymbol'), this loop needs adjustment.
-        # Assuming it's 'symbol' based on typical Protobuf generation.
-        symbols_field = getattr(actual_message, 'symbol', []) # Default to empty list if field not found
+        symbols_field = getattr(actual_message, 'symbol', [])
 
         print(f"Received ProtoOASymbolsListRes with {len(symbols_field)} light symbols.")
 
+        for light_symbol_proto in symbols_field:
+            symbol_name = light_symbol_proto.symbolName
+            symbol_id = light_symbol_proto.symbolId
+            self.symbols_map[symbol_name] = symbol_id
+            self._initialize_symbol_data_structures(symbol_name) # Initialize data storage for the new symbol
 
-        for light_symbol_proto in symbols_field: # These are ProtoOALightSymbol
-            self.symbols_map[light_symbol_proto.symbolName] = light_symbol_proto.symbolId
-            # print(f"  Light Symbol: {light_symbol_proto.symbolName}, ID: {light_symbol_proto.symbolId}")
-
-            if light_symbol_proto.symbolName == self.settings.general.default_symbol:
-                self.default_symbol_id = light_symbol_proto.symbolId
-                print(f"Found default_symbol: '{self.settings.general.default_symbol}' with ID: {self.default_symbol_id} (Light symbol details). Requesting full details.")
-
-        if self.default_symbol_id is not None:
-            # Now that we have the ID, request full details for the default symbol
-            self._send_get_symbol_details_request([self.default_symbol_id])
+        all_symbol_ids = list(self.symbols_map.values())
+        if all_symbol_ids:
+            print(f"Requesting full details for all {len(all_symbol_ids)} symbols.")
+            self._send_get_symbol_details_request(all_symbol_ids)
         else:
-            print(f"Warning: Default symbol '{self.settings.general.default_symbol}' not found in symbols list for account {self.ctid_trader_account_id}.")
-            self._last_error = f"Default symbol '{self.settings.general.default_symbol}' not found."
+            print(f"Warning: No symbols found for account {self.ctid_trader_account_id}.")
+            self._last_error = "No symbols found for account."
 
     def _handle_symbol_details_response(self, response_wrapper: Any) -> None:
         """Handles the response from a ProtoOASymbolByIdReq, containing full symbol details."""
@@ -623,41 +618,24 @@ class Trader:
             self.symbol_details_map[detailed_symbol_proto.symbolId] = detailed_symbol_proto
             print(f"  Stored full details for Symbol ID: {detailed_symbol_proto.symbolId} ({symbol_name_for_logging}), Digits: {detailed_symbol_proto.digits}, PipPosition: {detailed_symbol_proto.pipPosition}")
 
-        # After updating the details map, check if we have details for the default symbol
-        # and if so, proceed to subscribe for its spot prices.
-        if self.default_symbol_id is not None and self.default_symbol_id in self.symbol_details_map:
-            # Get the default symbol's name from symbols_map for logging
-            default_symbol_name_for_logging = "Unknown"
-            for name, id_val in self.symbols_map.items():
-                if id_val == self.default_symbol_id:
-                    default_symbol_name_for_logging = name
-                    break
-
-            print(f"Full details for default symbol '{default_symbol_name_for_logging}' (ID: {self.default_symbol_id}) received. Subscribing to spots.")
-
-            # Ensure ctidTraderAccountId is available before subscribing
+        # After receiving details, fetch history and subscribe to spots for all detailed symbols
+        symbol_ids_to_subscribe = [sym.symbolId for sym in actual_message.symbol]
+        if symbol_ids_to_subscribe:
+            print(f"Fetching history and subscribing to spots for {len(symbol_ids_to_subscribe)} symbols.")
             if self.ctid_trader_account_id is not None:
-                # Fetch historical data for 1m timeframe for the default symbol
-                # Assuming M1 is ProtoOATrendbarPeriod.M1
-                # Fetch max_ohlc_history_len bars (e.g., 200)
-                print(f"Fetching initial historical 1m trendbars for default symbol {default_symbol_name_for_logging} (ID: {self.default_symbol_id}).")
-                self._send_get_trendbars_request(
-                    symbol_id=self.default_symbol_id,
-                    period=ProtoOATrendbarPeriod.M1, # Assuming M1 is the desired period
-                    count=self.max_ohlc_history_len
-                )
-                # Note: We might want to fetch for other timeframes too if strategies use them.
-                # For now, focusing on '1m'.
-
-                # After requesting historical data, subscribe to live spots
-                self._send_subscribe_spots_request(self.ctid_trader_account_id, [self.default_symbol_id])
-                self.subscribed_spot_symbol_ids.add(self.default_symbol_id)
+                for symbol_id in symbol_ids_to_subscribe:
+                    # Fetch historical data for each symbol
+                    self._send_get_trendbars_request(
+                        symbol_id=symbol_id,
+                        period=ProtoOATrendbarPeriod.M1,
+                        count=self.max_ohlc_history_len
+                    )
+                # Subscribe to live spots for all symbols at once
+                self._send_subscribe_spots_request(self.ctid_trader_account_id, symbol_ids_to_subscribe)
+                self.subscribed_spot_symbol_ids.update(symbol_ids_to_subscribe)
             else:
-                print(f"Error: ctidTraderAccountId not set. Cannot subscribe to spots or fetch history for {default_symbol_name_for_logging}.")
-                self._last_error = "ctidTraderAccountId not available for spot subscription after getting symbol details."
-        elif self.default_symbol_id is not None:
-            # This case should ideally not be hit if ProtoOASymbolByIdReq was successful for default_symbol_id
-            print(f"Warning: Full details for default symbol ID {self.default_symbol_id} not found in response, cannot subscribe to its spots yet.")
+                print("Error: ctidTraderAccountId not set. Cannot subscribe to spots or fetch history.")
+                self._last_error = "ctidTraderAccountId not available for operations after getting symbol details."
 
 
     def _handle_account_auth_response(self, response: ProtoOAAccountAuthRes) -> None:
@@ -939,80 +917,89 @@ class Trader:
     def _handle_spot_event(self, event: ProtoOASpotEvent) -> None:
         """Handles incoming spot events (price updates)."""
         symbol_id = event.symbolId
+        symbol_name = None
+        for name, id_val in self.symbols_map.items():
+            if id_val == symbol_id:
+                symbol_name = name
+                break
 
-        if self.default_symbol_id is not None and symbol_id == self.default_symbol_id:
-            # Detailed timestamp handling
-            if event.timestamp == 0:
-                # Fall back to local time if server timestamp is missing
-                event_dt = datetime.now(timezone.utc)
-                print(f"WARNING: SpotEvent has no timestamp; falling back to local time {event_dt.isoformat()}")
+        if not symbol_name:
+            # print(f"Spot event for unknown symbol ID: {symbol_id}")
+            return
+
+        # Detailed timestamp handling
+        if event.timestamp == 0:
+            event_dt = datetime.now(timezone.utc)
+            # print(f"WARNING: SpotEvent for {symbol_name} has no timestamp; falling back to local time.")
+        else:
+            event_dt = datetime.fromtimestamp(event.timestamp / 1000, tz=timezone.utc)
+
+        # Scale price
+        raw_bid = event.bid
+        price_scale = 100000.0
+        if symbol_id in self.symbol_details_map:
+            digits = self.symbol_details_map[symbol_id].digits
+            price_scale = float(10 ** digits)
+        current_price = raw_bid / price_scale
+
+        # Update price history for the specific symbol
+        if symbol_name not in self.price_history:
+            self.price_history[symbol_name] = []
+
+        self.price_history[symbol_name].append(current_price)
+        if len(self.price_history[symbol_name]) > self.history_size:
+            self.price_history[symbol_name].pop(0)
+
+        # Build OHLC bars for each timeframe
+        for tf_str, tf_seconds in self.timeframes_seconds.items():
+            bar = self.current_bars[symbol_name][tf_str]
+
+            # Initialize bar if empty
+            if bar['timestamp'] is None:
+                start_ts = event_dt.replace(second=(event_dt.second // tf_seconds) * tf_seconds, microsecond=0)
+                bar.update({
+                    'timestamp': start_ts,
+                    'open': current_price,
+                    'high': current_price,
+                    'low': current_price,
+                    'close': current_price,
+                    'volume': 1
+                })
             else:
-                # Convert milliseconds to seconds
-                event_dt = datetime.fromtimestamp(event.timestamp / 1000, tz=timezone.utc)
-
-            # Scale price
-            raw_bid = event.bid
-            price_scale = 100000.0
-            if symbol_id in self.symbol_details_map:
-                digits = self.symbol_details_map[symbol_id].digits
-                price_scale = float(10 ** digits)
-            current_price = raw_bid / price_scale
-
-            # Update price history
-            self.price_history.append(current_price)
-            if len(self.price_history) > self.history_size:
-                self.price_history.pop(0)
-
-            # # Build OHLC bars for each timeframe
-            # for tf_str, tf_seconds in self.timeframes_seconds.items():
-            #     bar = self.current_bars[tf_str]
-
-            #     # Initialize bar if empty
-            #     if bar['timestamp'] is None:
-            #         start_ts = event_dt.replace(second=(event_dt.second // tf_seconds) * tf_seconds, microsecond=0)
-            #         bar.update({
-            #             'timestamp': start_ts,
-            #             'open': current_price,
-            #             'high': current_price,
-            #             'low': current_price,
-            #             'close': current_price,
-            #             'volume': 1
-            #         })
-            #     else:
-            #         bar_end = bar['timestamp'] + pd.Timedelta(seconds=tf_seconds)
-            #         if event_dt >= bar_end:
-            #             # Finalize and store completed bar
-            #             completed = {
-            #                 'timestamp': bar['timestamp'],
-            #                 'open': bar['open'],
-            #                 'high': bar['high'],
-            #                 'low': bar['low'],
-            #                 'close': bar['close'],
-            #                 'volume': bar['volume']
-            #             }
-            #             self.ohlc_history[tf_str] = pd.concat([
-            #                 self.ohlc_history[tf_str],
-            #                 pd.DataFrame([completed])
-            #             ], ignore_index=True)
-            #             # Trim history length
-            #             if len(self.ohlc_history[tf_str]) > self.max_ohlc_history_len:
-            #                 self.ohlc_history[tf_str] = self.ohlc_history[tf_str].iloc[-self.max_ohlc_history_len:]
-            #             # Start new bar
-            #             start_ts = event_dt.replace(second=(event_dt.second // tf_seconds) * tf_seconds, microsecond=0)
-            #             bar.update({
-            #                 'timestamp': start_ts,
-            #                 'open': current_price,
-            #                 'high': current_price,
-            #                 'low': current_price,
-            #                 'close': current_price,
-            #                 'volume': 1
-            #             })
-            #         else:
-            #             # Update ongoing bar
-            #             bar['high'] = max(bar['high'], current_price)
-            #             bar['low'] = min(bar['low'], current_price)
-            #             bar['close'] = current_price
-            #             bar['volume'] += 1
+                bar_end = bar['timestamp'] + pd.Timedelta(seconds=tf_seconds)
+                if event_dt >= bar_end:
+                    # Finalize and store completed bar
+                    completed = {
+                        'timestamp': bar['timestamp'],
+                        'open': bar['open'],
+                        'high': bar['high'],
+                        'low': bar['low'],
+                        'close': bar['close'],
+                        'volume': bar['volume']
+                    }
+                    self.ohlc_history[symbol_name][tf_str] = pd.concat([
+                        self.ohlc_history[symbol_name][tf_str],
+                        pd.DataFrame([completed])
+                    ], ignore_index=True)
+                    # Trim history length
+                    if len(self.ohlc_history[symbol_name][tf_str]) > self.max_ohlc_history_len:
+                        self.ohlc_history[symbol_name][tf_str] = self.ohlc_history[symbol_name][tf_str].iloc[-self.max_ohlc_history_len:]
+                    # Start new bar
+                    start_ts = event_dt.replace(second=(event_dt.second // tf_seconds) * tf_seconds, microsecond=0)
+                    bar.update({
+                        'timestamp': start_ts,
+                        'open': current_price,
+                        'high': current_price,
+                        'low': current_price,
+                        'close': current_price,
+                        'volume': 1
+                    })
+                else:
+                    # Update ongoing bar
+                    bar['high'] = max(bar['high'], current_price)
+                    bar['low'] = min(bar['low'], current_price)
+                    bar['close'] = current_price
+                    bar['volume'] += 1
 
         
     def get_available_symbol_names(self) -> List[str]:
@@ -1563,29 +1550,27 @@ class Trader:
             "margin": self.used_margin
         }
 
-    def get_market_price(self, symbol: str) -> Optional[float]:
-        
+    def get_market_price(self, symbol_name: str) -> Optional[float]:
         if not USE_OPENAPI_LIB:
             # Mock mode: return a random price
-            print(f"Mock mode: Returning random price for {symbol}")
+            print(f"Mock mode: Returning random price for {symbol_name}")
             return round(random.uniform(1.10, 1.20), 5)
 
-        if not self.price_history:
-            return None # No data yet
+        if symbol_name in self.price_history and self.price_history[symbol_name]:
+            return self.price_history[symbol_name][-1]
 
-        # This is a temporary fix. A proper solution requires a more significant refactoring.
-        # For now, we will just return the last price in the history, regardless of the symbol.
-        return self.price_history[-1]
+        print(f"No price history available for {symbol_name}.")
+        return None
 
-    def get_price_history(self) -> List[float]:
-        return list(self.price_history)
+    def get_price_history(self, symbol_name: str) -> List[float]:
+        return list(self.price_history.get(symbol_name, []))
 
-    def get_ohlc_bar_counts(self) -> Dict[str, int]:
-        """Returns a dictionary with the count of available OHLC bars for each timeframe."""
+    def get_ohlc_bar_counts(self, symbol_name: str) -> Dict[str, int]:
+        """Returns a dictionary with the count of available OHLC bars for a given symbol."""
         counts = {}
-        for tf_str, df_history in self.ohlc_history.items():
-            # df_history is a DataFrame, len(df_history) gives the number of rows (bars)
-            counts[tf_str] = len(df_history)
+        if symbol_name in self.ohlc_history:
+            for tf_str, df_history in self.ohlc_history[symbol_name].items():
+                counts[tf_str] = len(df_history)
         return counts
 
     def close_all_positions(self) -> None:
@@ -1900,17 +1885,20 @@ class Trader:
 
         new_df = pd.DataFrame(processed_bars)
 
-        self.ohlc_history[tf_str] = new_df
-        print(f"Populated {tf_str} OHLC history with {len(new_df)} bars for symbol ID {symbol_id}. Last bar timestamp: {new_df.iloc[-1]['timestamp'] if not new_df.empty else 'N/A'}")
-
+        symbol_name = None
+        for name, id_val in self.symbols_map.items():
+            if id_val == symbol_id:
+                symbol_name = name
+                break
         
-        if not new_df.empty:
-            last_hist_bar = new_df.iloc[-1]
-            
-            self.current_bars[tf_str] = {
-                'timestamp': None, 'open': None, 'high': None, 'low': None, 'close': None, 'volume': 0
-            }
-            print(f"Reset current_bar for {tf_str} to allow live aggregation post-history fetch.")
+        if symbol_name:
+            self.ohlc_history[symbol_name][tf_str] = new_df
+            print(f"Populated {tf_str} OHLC history for {symbol_name} with {len(new_df)} bars. Last bar timestamp: {new_df.iloc[-1]['timestamp'] if not new_df.empty else 'N/A'}")
+            if not new_df.empty:
+                self.current_bars[symbol_name][tf_str] = {
+                    'timestamp': None, 'open': None, 'high': None, 'low': None, 'close': None, 'volume': 0
+                }
+                print(f"Reset current_bar for {symbol_name}/{tf_str}.")
 
         # Potentially, trigger a GUI update for data readiness explicitly here if needed,
         # though the periodic GUI poll should pick it up.
