@@ -168,22 +168,8 @@ class Trader:
         self._token_expires_at: Optional[float] = None
         self._load_tokens_from_file() # Load tokens on initialization
 
-    def _initialize_symbol_data_structures(self, symbol_name: str):
-        """Initializes the data storage for a newly discovered symbol."""
-        if symbol_name not in self.ohlc_history:
-            self.ohlc_history[symbol_name] = {}
-            self.current_bars[symbol_name] = {}
-            for tf_str in self.timeframes_seconds.keys():
-                self.ohlc_history[symbol_name][tf_str] = pd.DataFrame(
-                    columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
-                )
-                self.current_bars[symbol_name][tf_str] = {
-                    'timestamp': None, 'open': None, 'high': None, 'low': None, 'close': None, 'volume': 0
-                }
-            print(f"Initialized data structures for symbol: {symbol_name}")
-
         # Account details
-        self.ctid_trader_account_id: Optional[int] = settings.openapi.default_ctid_trader_account_id
+        self.ctid_trader_account_id: Optional[int] = self.settings.openapi.default_ctid_trader_account_id
         self.account_id: Optional[str] = None # Will be string representation of ctidTraderAccountId
         self.balance: Optional[float] = None
         self.equity: Optional[float] = None
@@ -206,7 +192,7 @@ class Trader:
         if USE_OPENAPI_LIB:
             host = (
                 EndPoints.PROTOBUF_LIVE_HOST
-                if settings.openapi.host_type == "live"
+                if self.settings.openapi.host_type == "live"
                 else EndPoints.PROTOBUF_DEMO_HOST
             )
             port = EndPoints.PROTOBUF_PORT
@@ -220,6 +206,20 @@ class Trader:
         self._auth_code_queue = queue.Queue() # Queue to pass auth_code from HTTP server thread
         self._http_server_thread: Optional[threading.Thread] = None
         self._http_server: Optional[HTTPServer] = None
+
+    def _initialize_symbol_data_structures(self, symbol_name: str):
+        """Initializes the data storage for a newly discovered symbol."""
+        if symbol_name not in self.ohlc_history:
+            self.ohlc_history[symbol_name] = {}
+            self.current_bars[symbol_name] = {}
+            for tf_str in self.timeframes_seconds.keys():
+                self.ohlc_history[symbol_name][tf_str] = pd.DataFrame(
+                    columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                )
+                self.current_bars[symbol_name][tf_str] = {
+                    'timestamp': None, 'open': None, 'high': None, 'low': None, 'close': None, 'volume': 0
+                }
+            print(f"Initialized data structures for symbol: {symbol_name}")
 
     def _save_tokens_to_file(self):
         """Saves the current OAuth access token, refresh token, and expiry time to TOKEN_FILE_PATH."""
